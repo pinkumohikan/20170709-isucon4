@@ -98,6 +98,10 @@ function attempt_login($login, $password) {
   $stmt->bindValue(':login', $login);
   $stmt->execute();
   $user = $stmt->fetch(PDO::FETCH_ASSOC);
+  if (empty($user)) {
+    login_log(false, $login);
+    return ['error' => 'wrong_login'];
+  }
 
   if (ip_banned()) {
     login_log(false, $login, isset($user['id']) ? $user['id'] : null);
@@ -109,17 +113,13 @@ function attempt_login($login, $password) {
     return ['error' => 'locked'];
   }
 
-  if (!empty($user) && calculate_password_hash($password, $user['salt']) == $user['password_hash']) {
+  if (calculate_password_hash($password, $user['salt']) == $user['password_hash']) {
     login_log(true, $login, $user['id']);
     return ['user' => $user];
   }
-  elseif (!empty($user)) {
+  else {
     login_log(false, $login, $user['id']);
     return ['error' => 'wrong_password'];
-  }
-  else {
-    login_log(false, $login);
-    return ['error' => 'wrong_login'];
   }
 }
 
