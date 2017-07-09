@@ -35,7 +35,7 @@ function configure() {
   option('config', $config);
 
   $redis = new Predis\Client();
-  option('redis_conn', $redis);
+  option('redis', $redis);
 }
 
 function uri_for($path) {
@@ -93,11 +93,9 @@ function ip_banned() {
 
 function attempt_login($login, $password) {
   $db = option('db_conn');
+  $redis = option('redis');
 
-  $stmt = $db->prepare('SELECT * FROM users WHERE login = :login');
-  $stmt->bindValue(':login', $login);
-  $stmt->execute();
-  $user = $stmt->fetch(PDO::FETCH_ASSOC);
+  $user = unserialize($redis->get('User:'.$login));
   if (empty($user)) {
     login_log(false, $login);
     return ['error' => 'wrong_login'];
@@ -124,23 +122,7 @@ function attempt_login($login, $password) {
 }
 
 function current_user() {
-  if (empty($_SESSION['user_id'])) {
-    return null;
-  }
-
-  $db = option('db_conn');
-
-  $stmt = $db->prepare('SELECT * FROM users WHERE id = :id');
-  $stmt->bindValue(':id', $_SESSION['user_id']);
-  $stmt->execute();
-  $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-  if (empty($user)) {
-    unset($_SESSION['user_id']);
-    return null;
-  }
-
-  return $user;
+  return isset($_SESSION['user']) ? $_SESSION['user'] : null;
 }
 
 function last_login() {
@@ -226,7 +208,7 @@ dispatch_post('/login', function() {
   $result = attempt_login($_POST['login'], $_POST['password']);
   if (!empty($result['user'])) {
     session_regenerate_id(true);
-    $_SESSION['user_id'] = $result['user']['id'];
+    $_SESSION['user'] = $result['user'];
     return redirect_to('/mypage');
   }
   else {
