@@ -6,28 +6,6 @@ function configure() {
   option('base_uri', '/');
   option('session', 'isu4_qualifier_session');
 
-  $host = getenv('ISU4_DB_HOST') ?: 'localhost';
-  $port = getenv('ISU4_DB_PORT') ?: 3306;
-  $dbname = getenv('ISU4_DB_NAME') ?: 'isu4_qualifier';
-  $username = getenv('ISU4_DB_USER') ?: 'root';
-  $password = getenv('ISU4_DB_PASSWORD');
-  $db = null;
-  try {
-    $db = new PDO(
-      'mysql:host=' . $host . ';port=' . $port. ';dbname=' . $dbname,
-      $username,
-      $password,
-      [ PDO::ATTR_PERSISTENT => true,
-        PDO::MYSQL_ATTR_INIT_COMMAND => 'SET CHARACTER SET `utf8`',
-      ]
-    );
-  } catch (PDOException $e) {
-    halt("Connection faild: $e");
-  }
-  $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-  option('db_conn', $db);
-
   $config = [
     'user_lock_threshold' => getenv('ISU4_USER_LOCK_THRESHOLD') ?: 3,
     'ip_ban_threshold' => getenv('ISU4_IP_BAN_THRESHOLD') ?: 10
@@ -56,7 +34,6 @@ function calculate_password_hash($password, $salt) {
 }
 
 function login_log($succeeded, $login, $user_id=null) {
-  $db = option('db_conn');
   $redis = option('redis');
 
   if ($succeeded) {
@@ -79,13 +56,6 @@ function login_log($succeeded, $login, $user_id=null) {
       $redis->hincrby('LoginFailuresByLogin', $login, 1);
       $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
   }
-
-  $stmt = $db->prepare('INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (NOW(),:user_id,:login,:ip,:succeeded)');
-  $stmt->bindValue(':user_id', $user_id);
-  $stmt->bindValue(':login', $login);
-  $stmt->bindValue(':ip', $_SERVER['REMOTE_ADDR']);
-  $stmt->bindValue(':succeeded', $succeeded ? 1 : 0);
-  $stmt->execute();
 }
 
 function user_locked($user) {
@@ -111,7 +81,6 @@ function ip_banned() {
 }
 
 function attempt_login($login, $password) {
-  $db = option('db_conn');
   $redis = option('redis');
 
   $user = unserialize($redis->get('User:'.$login));
