@@ -1,0 +1,12 @@
+{
+    "name": "isucon/src",
+    "authors": [
+        {
+            "name": "p",
+            "email": "a@a.com"
+        }
+    ],
+    "require": {
+        "predis/predis": "^1.1"
+    }
+}
