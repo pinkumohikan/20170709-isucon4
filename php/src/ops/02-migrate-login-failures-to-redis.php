@@ -21,8 +21,10 @@ $st->execute();
 foreach($st as $l) {
     if ($l['succeeded'] === '1') {
         $redis->hset('LoginFailuresByLogin', $l['login'], 0);
+        $redis->hset('LoginFailuresByIp', $l['ip'], 0);
     } else {
         $redis->hincrby('LoginFailuresByLogin', $l['login'], 1);
+        $redis->hincrby('LoginFailuresByIp', $l['ip'], 1);
     }
 }
 

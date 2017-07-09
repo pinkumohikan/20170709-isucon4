@@ -61,8 +61,10 @@ function login_log($succeeded, $login, $user_id=null) {
 
   if ($succeeded) {
       $redis->hset('LoginFailuresByLogin', $login, 0);
+      $redis->hset('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 0);
   } else {
       $redis->hincrby('LoginFailuresByLogin', $login, 1);
+      $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
   }
 
   $stmt = $db->prepare('INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (NOW(),:user_id,:login,:ip,:succeeded)');
@@ -86,14 +88,13 @@ function user_locked($user) {
 
 # FIXME
 function ip_banned() {
-  $db = option('db_conn');
-  $stmt = $db->prepare('SELECT COUNT(1) AS failures FROM login_log WHERE ip = :ip AND id > IFNULL((select id from login_log where ip = :ip AND succeeded = 1 ORDER BY id DESC LIMIT 1), 0)');
-  $stmt->bindValue(':ip', $_SERVER['REMOTE_ADDR']);
-  $stmt->execute();
-  $log = $stmt->fetch(PDO::FETCH_ASSOC);
+  $redis = option('redis');
+  $failureCount = $redis->hget('LoginFailuresByIp', $_SERVER['REMOTE_ADDR']);
+  if (!$failureCount) {
+    return false;
+  }
 
-  $config = option('config');
-  return $config['ip_ban_threshold'] <= $log['failures'];
+  return $failureCount >= option('config')['ip_ban_threshold'];
 }
 
 function attempt_login($login, $password) {
@@ -149,27 +150,13 @@ function banned_ips() {
   $threshold = option('config')['ip_ban_threshold'];
   $ips = [];
 
-  $db = option('db_conn');
+  $redis = option('redis');
+  $failures = $redis->hgetall('LoginFailuresByIp');
 
-  $stmt = $db->prepare('SELECT ip FROM (SELECT ip, MAX(succeeded) as max_succeeded, COUNT(1) as cnt FROM login_log GROUP BY ip) AS t0 WHERE t0.max_succeeded = 0 AND t0.cnt >= :threshold');
-  $stmt->bindValue(':threshold', $threshold);
-  $stmt->execute();
-  $not_succeeded = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
-  $ips = array_merge($not_succeeded);
-
-  $stmt = $db->prepare('SELECT ip, MAX(id) AS last_login_id FROM login_log WHERE succeeded = 1 GROUP by ip');
-  $stmt->execute();
-  $last_succeeds = $stmt->fetchAll();
-
-  foreach ($last_succeeds as $row) {
-    $stmt = $db->prepare('SELECT COUNT(1) AS cnt FROM login_log WHERE ip = :ip AND :id < id');
-    $stmt->bindValue(':ip', $row['ip']);
-    $stmt->bindValue(':id', $row['last_login_id']);
-    $stmt->execute();
-    $count = $stmt->fetch(PDO::FETCH_ASSOC)['cnt'];
-    if ($threshold <= $count) {
-      array_push($ips, $row['ip']);
-    }
+  foreach ($failures as $ip => $c) {
+      if ($c >= $threshold) {
+          $ips[] = $ip;
+      }
   }
 
   return $ips;
