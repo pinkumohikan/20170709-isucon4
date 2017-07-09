@@ -1,5 +1,6 @@
 <?php
 require_once 'limonade/lib/limonade.php';
+require_once 'vendor/autoload.php';
 
 function configure() {
   option('base_uri', '/');
@@ -32,6 +33,9 @@ function configure() {
     'ip_ban_threshold' => getenv('ISU4_IP_BAN_THRESHOLD') ?: 10
   ];
   option('config', $config);
+
+  $redis = new Predis\Client();
+  option('redis_conn', $redis);
 }
 
 function uri_for($path) {
