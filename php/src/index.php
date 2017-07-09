@@ -57,6 +57,13 @@ function calculate_password_hash($password, $salt) {
 
 function login_log($succeeded, $login, $user_id=null) {
   $db = option('db_conn');
+  $redis = option('redis');
+
+  if ($succeeded) {
+      $redis->hset('LoginFailuresByLogin', $login, 0);
+  } else {
+      $redis->hincrby('LoginFailuresByLogin', $login, 1);
+  }
 
   $stmt = $db->prepare('INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (NOW(),:user_id,:login,:ip,:succeeded)');
   $stmt->bindValue(':user_id', $user_id);
@@ -67,16 +74,14 @@ function login_log($succeeded, $login, $user_id=null) {
 }
 
 function user_locked($user) {
-  if (empty($user)) { return null; }
+  // ユーザIDごとに最後のログイン成功からのログイン試行数が閾値を超えるか
+  $redis = option('redis');
+  $failureCount = $redis->hget('LoginFailuresByLogin', $user['login']);
+  if (!$failureCount) {
+    return false;
+  }
 
-  $db = option('db_conn');
-  $stmt = $db->prepare('SELECT COUNT(1) AS failures FROM login_log WHERE user_id = :user_id AND id > IFNULL((select id from login_log where user_id = :user_id AND succeeded = 1 ORDER BY id DESC LIMIT 1), 0)');
-  $stmt->bindValue(':user_id', $user['id']);
-  $stmt->execute();
-  $log = $stmt->fetch(PDO::FETCH_ASSOC);
-
-  $config = option('config');
-  return $config['user_lock_threshold'] <= $log['failures'];
+  return $failureCount >= option('config')['user_lock_threshold'];
 }
 
 # FIXME
@@ -174,27 +179,13 @@ function locked_users() {
   $threshold = option('config')['user_lock_threshold'];
   $user_ids = [];
 
-  $db = option('db_conn');
+  $redis = option('redis');
+  $failures = $redis->hgetall('LoginFailuresByLogin');
 
-  $stmt = $db->prepare('SELECT login FROM (SELECT user_id, login, MAX(succeeded) as max_succeeded, COUNT(1) as cnt FROM login_log GROUP BY user_id) AS t0 WHERE t0.user_id IS NOT NULL AND t0.max_succeeded = 0 AND t0.cnt >= :threshold');
-  $stmt->bindValue(':threshold', $threshold);
-  $stmt->execute();
-  $not_succeeded = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
-  $user_ids = array_merge($not_succeeded);
-
-  $stmt = $db->prepare('SELECT user_id, login, MAX(id) AS last_login_id FROM login_log WHERE user_id IS NOT NULL AND succeeded = 1 GROUP BY user_id');
-  $stmt->execute();
-  $last_succeeds = $stmt->fetchAll();
-
-  foreach ($last_succeeds as $row) {
-    $stmt = $db->prepare('SELECT COUNT(1) AS cnt FROM login_log WHERE user_id = :user_id AND :id < id');
-    $stmt->bindValue(':user_id', $row['user_id']);
-    $stmt->bindValue(':id', $row['last_login_id']);
-    $stmt->execute();
-    $count = $stmt->fetch(PDO::FETCH_ASSOC)['cnt'];
-    if ($threshold <= $count) {
-      array_push($user_ids, $row['login']);
-    }
+  foreach ($failures as $l => $c) {
+      if ($c >= $threshold) {
+          $user_ids[] = $l;
+      }
   }
 
   return $user_ids;
