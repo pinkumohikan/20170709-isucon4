@@ -12,7 +12,7 @@ function configure() {
   ];
   option('config', $config);
 
-  $redis = new Predis\Client();
+  $redis = new Predis\Client('unix:/var/run/redis/redis.sock');
   option('redis', $redis);
 }
 
