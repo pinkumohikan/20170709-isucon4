@@ -58,6 +58,18 @@ function calculate_password_hash($password, $salt) {
 function login_log($succeeded, $login, $user_id=null) {
   $db = option('db_conn');
 
+  if ($succeeded) {
+      $redis = option('redis');
+      $redis->hset(
+          'LoginSuccessLog',
+          $user_id,
+          serialize([
+              (new DateTime())->format('Y-m-d H:i:s'),
+              $_SERVER['REMOTE_ADDR']
+          ])
+      );
+  }
+
   $stmt = $db->prepare('INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (NOW(),:user_id,:login,:ip,:succeeded)');
   $stmt->bindValue(':user_id', $user_id);
   $stmt->bindValue(':login', $login);
@@ -125,19 +137,21 @@ function current_user() {
   return isset($_SESSION['user']) ? $_SESSION['user'] : null;
 }
 
-function last_login() {
-  $user = current_user();
-  if (empty($user)) {
-    return null;
+function last_login($userId) {
+  $redis = option('redis');
+
+  $log = unserialize($redis->hget('LoginSuccessLog', $userId));
+  if (!$log) {
+      return [
+          'created_at' => null,
+          'ip'         => null
+      ];
   }
 
-  $db = option('db_conn');
-
-  $stmt = $db->prepare('SELECT * FROM login_log WHERE succeeded = 1 AND user_id = :id ORDER BY id DESC LIMIT 2');
-  $stmt->bindValue(':id', $user['id']);
-  $stmt->execute();
-  $stmt->fetch();
-  return $stmt->fetch(PDO::FETCH_ASSOC);
+  return [
+    'created_at' => $log[0],
+    'ip'         => $log[1],
+  ];
 }
 
 function banned_ips() {
@@ -236,7 +250,7 @@ dispatch_get('/mypage', function() {
   }
   else {
     set('user', $user);
-    set('last_login', last_login());
+    set('last_login', last_login($user['id']));
     return html('mypage.html.php');
   }
 });
