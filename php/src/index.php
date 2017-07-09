@@ -62,13 +62,11 @@ function login_log($succeeded, $login, $user_id=null) {
   if ($succeeded) {
       $redis->hset('LoginFailuresByLogin', $login, 0);
       $redis->hset('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 0);
-  } else {
-      $redis->hincrby('LoginFailuresByLogin', $login, 1);
-      $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
-  }
 
-  if ($succeeded) {
-      $redis = option('redis');
+      $lastLogin = $redis->hget('LoginSuccessLog', $user_id);
+      if ($lastLogin) {
+          $_SESSION['last_login_log'] = unserialize($lastLogin);
+      }
       $redis->hset(
           'LoginSuccessLog',
           $user_id,
@@ -77,6 +75,9 @@ function login_log($succeeded, $login, $user_id=null) {
               $_SERVER['REMOTE_ADDR']
           ])
       );
+  } else {
+      $redis->hincrby('LoginFailuresByLogin', $login, 1);
+      $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
   }
 
   $stmt = $db->prepare('INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (NOW(),:user_id,:login,:ip,:succeeded)');
@@ -144,9 +145,9 @@ function current_user() {
 }
 
 function last_login($userId) {
-  $redis = option('redis');
-
-  $log = unserialize($redis->hget('LoginSuccessLog', $userId));
+  $log = isset($_SESSION['last_login_log'])
+      ? $_SESSION['last_login_log']
+      : [];
   if (!$log) {
       return [
           'created_at' => null,
