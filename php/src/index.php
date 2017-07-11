@@ -53,31 +53,23 @@ function login_log($succeeded, $login, $user_id=null) {
           ])
       );
   } else {
-      $redis->hincrby('LoginFailuresByLogin', $login, 1);
-      $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
+      $c = $redis->hincrby('LoginFailuresByLogin', $login, 1);
+      if ($c >= option('config')['user_lock_threshold']) {
+          apcu_store('Lock:'.$login, true);
+      }
+      $c = $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
+      if ($c >= option('config')['ip_ban_threshold']) {
+          apcu_store('IpBan:'.$_SERVER['REMOTE_ADDR'], true);
+      }
   }
 }
 
 function user_locked($user) {
-  // ユーザIDごとに最後のログイン成功からのログイン試行数が閾値を超えるか
-  $redis = option('redis');
-  $failureCount = $redis->hget('LoginFailuresByLogin', $user['login']);
-  if (!$failureCount) {
-    return false;
-  }
-
-  return $failureCount >= option('config')['user_lock_threshold'];
+    return apcu_fetch('Lock:'. $user['login']) ?: false;
 }
 
-# FIXME
 function ip_banned() {
-  $redis = option('redis');
-  $failureCount = $redis->hget('LoginFailuresByIp', $_SERVER['REMOTE_ADDR']);
-  if (!$failureCount) {
-    return false;
-  }
-
-  return $failureCount >= option('config')['ip_ban_threshold'];
+    return apcu_fetch('IpBan:'. $_SERVER['REMOTE_ADDR']) ?: false;
 }
 
 function attempt_login($login, $password) {
@@ -206,6 +198,28 @@ dispatch_get('/report', function() {
     'banned_ips' => banned_ips(),
     'locked_users' => locked_users()
   ]);
+});
+
+dispatch_get('/prepare', function () {
+  $redis = option('redis');
+
+  $threshold = option('config')['ip_ban_threshold'];
+  $failures = $redis->hgetall('LoginFailuresByIp');
+  foreach ($failures as $ip => $c) {
+    if ($c >= $threshold) {
+      apcu_store('IpBan:'.$ip, true);
+    }
+  }
+
+  $threshold = option('config')['user_lock_threshold'];
+  $failures = $redis->hgetall('LoginFailuresByLogin');
+  foreach ($failures as $id => $c) {
+    if ($c >= $threshold) {
+      apcu_store('Lock:'.$id, true);
+    }
+  }
+
+  echo 'done';
 });
 
 run();
