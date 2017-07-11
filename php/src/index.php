@@ -36,17 +36,25 @@ function calculate_password_hash($password, $salt) {
 function login_log($succeeded, $login, $user_id=null) {
   $redis = option('redis');
 
-  file_put_contents(
-      '/tmp/login.log',
-      implode(',', [(string)$succeeded, $login, $user_id, $_SERVER['REMOTE_ADDR']]).PHP_EOL,
-      FILE_APPEND
-  );
-
   if ($succeeded) {
-    $lastLogin = $redis->hget('LoginSuccessLog', $user_id);
-    if ($lastLogin) {
-        $_SESSION['last_login_log'] = unserialize($lastLogin);
-    }
+      $redis->hset('LoginFailuresByLogin', $login, 0);
+      $redis->hset('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 0);
+
+      $lastLogin = $redis->hget('LoginSuccessLog', $user_id);
+      if ($lastLogin) {
+          $_SESSION['last_login_log'] = unserialize($lastLogin);
+      }
+      $redis->hset(
+          'LoginSuccessLog',
+          $user_id,
+          serialize([
+              (new DateTime())->format('Y-m-d H:i:s'),
+              $_SERVER['REMOTE_ADDR']
+          ])
+      );
+  } else {
+      $redis->hincrby('LoginFailuresByLogin', $login, 1);
+      $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
   }
 }
 
