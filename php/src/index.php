@@ -83,15 +83,15 @@ function ip_banned() {
 function attempt_login($login, $password) {
   $redis = option('redis');
 
+  if (ip_banned()) {
+    login_log(false, $login, null);
+    return ['error' => 'banned'];
+  }
+
   $user = unserialize($redis->get('User:'.$login));
   if (empty($user)) {
     login_log(false, $login);
     return ['error' => 'wrong_login'];
-  }
-
-  if (ip_banned()) {
-    login_log(false, $login, isset($user['id']) ? $user['id'] : null);
-    return ['error' => 'banned'];
   }
 
   if (user_locked($user)) {
@@ -173,34 +173,32 @@ dispatch_post('/login', function() {
     $_SESSION['user'] = $result['user'];
     return redirect_to('/mypage');
   }
-  else {
-    switch($result['error']) {
-      case 'locked':
-        flash('notice', 'This account is locked.');
-        break;
-      case 'banned':
-        flash('notice', "You're banned.");
-        break;
-      default:
-        flash('notice', 'Wrong username or password');
-        break;
-    }
-    return redirect_to('/');
+
+  switch($result['error']) {
+    case 'locked':
+      flash('notice', 'This account is locked.');
+      break;
+    case 'banned':
+      flash('notice', "You're banned.");
+      break;
+    default:
+      flash('notice', 'Wrong username or password');
+      break;
   }
+
+  return redirect_to('/');
 });
 
 dispatch_get('/mypage', function() {
   $user = current_user();
-
   if (empty($user)) {
     flash('notice', 'You must be logged in');
     return redirect_to('/');
   }
-  else {
-    set('user', $user);
-    set('last_login', last_login($user['id']));
-    return html('mypage.html.php');
-  }
+
+  set('user', $user);
+  set('last_login', last_login($user['id']));
+  return html('mypage.html.php');
 });
 
 dispatch_get('/report', function() {
