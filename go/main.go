@@ -7,11 +7,13 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/martini-contrib/render"
 	"github.com/martini-contrib/sessions"
+	"github.com/garyburd/redigo/redis"
 	"net/http"
 	"strconv"
 )
 
 var db *sql.DB
+var r redis.Conn
 var (
 	UserLockThreshold int
 	IPBanThreshold    int
@@ -40,6 +42,11 @@ func init() {
 	}
 
 	IPBanThreshold, err = strconv.Atoi(getEnv("ISU4_IP_BAN_THRESHOLD", "10"))
+	if err != nil {
+		panic(err)
+	}
+
+	r, err = redis.Dial("tcp", "127.0.0.1:6379")
 	if err != nil {
 		panic(err)
 	}
