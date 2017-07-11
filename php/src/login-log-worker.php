@@ -17,20 +17,21 @@ while (true) {
     }
 
     list($succeeded, $login, $user_id, $ip) = explode(',', $input);
-      if ($succeeded) {
-      $redis->hset('LoginFailuresByLogin', $login, 0);
-      $redis->hset('LoginFailuresByIp', $ip, 0);
+    $ip = trim($ip);
+    if ($succeeded) {
+        $redis->hset('LoginFailuresByLogin', $login, 0);
+        $redis->hset('LoginFailuresByIp', $ip, 0);
 
-      $redis->hset(
-          'LoginSuccessLog',
-          $user_id,
-          serialize([
-              (new DateTime())->format('Y-m-d H:i:s'),
-              $ip
-          ])
-      );
+        $redis->hset(
+            'LoginSuccessLog',
+            $user_id,
+            serialize([
+                (new DateTime())->format('Y-m-d H:i:s'),
+                $ip
+            ])
+        );
     } else {
-      $redis->hincrby('LoginFailuresByLogin', $login, 1);
-      $redis->hincrby('LoginFailuresByIp', $ip, 1);
+        $redis->hincrby('LoginFailuresByLogin', $login, 1);
+        $redis->hincrby('LoginFailuresByIp', $ip, 1);
     }
 }
