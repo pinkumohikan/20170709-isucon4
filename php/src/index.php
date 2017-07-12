@@ -53,45 +53,37 @@ function login_log($succeeded, $login, $user_id=null) {
           ])
       );
   } else {
-      $redis->hincrby('LoginFailuresByLogin', $login, 1);
-      $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
+      $c = $redis->hincrby('LoginFailuresByLogin', $login, 1);
+      if ($c >= option('config')['user_lock_threshold']) {
+          apcu_store('Lock:'.$login, true);
+      }
+      $c = $redis->hincrby('LoginFailuresByIp', $_SERVER['REMOTE_ADDR'], 1);
+      if ($c >= option('config')['ip_ban_threshold']) {
+          apcu_store('IpBan:'.$_SERVER['REMOTE_ADDR'], true);
+      }
   }
 }
 
 function user_locked($user) {
-  // ユーザIDごとに最後のログイン成功からのログイン試行数が閾値を超えるか
-  $redis = option('redis');
-  $failureCount = $redis->hget('LoginFailuresByLogin', $user['login']);
-  if (!$failureCount) {
-    return false;
-  }
-
-  return $failureCount >= option('config')['user_lock_threshold'];
+    return apcu_fetch('Lock:'. $user['login']) ?: false;
 }
 
-# FIXME
 function ip_banned() {
-  $redis = option('redis');
-  $failureCount = $redis->hget('LoginFailuresByIp', $_SERVER['REMOTE_ADDR']);
-  if (!$failureCount) {
-    return false;
-  }
-
-  return $failureCount >= option('config')['ip_ban_threshold'];
+    return apcu_fetch('IpBan:'. $_SERVER['REMOTE_ADDR']) ?: false;
 }
 
 function attempt_login($login, $password) {
   $redis = option('redis');
 
+  if (ip_banned()) {
+    login_log(false, $login, null);
+    return ['error' => 'banned'];
+  }
+
   $user = unserialize($redis->get('User:'.$login));
   if (empty($user)) {
     login_log(false, $login);
     return ['error' => 'wrong_login'];
-  }
-
-  if (ip_banned()) {
-    login_log(false, $login, isset($user['id']) ? $user['id'] : null);
-    return ['error' => 'banned'];
   }
 
   if (user_locked($user)) {
@@ -173,34 +165,32 @@ dispatch_post('/login', function() {
     $_SESSION['user'] = $result['user'];
     return redirect_to('/mypage');
   }
-  else {
-    switch($result['error']) {
-      case 'locked':
-        flash('notice', 'This account is locked.');
-        break;
-      case 'banned':
-        flash('notice', "You're banned.");
-        break;
-      default:
-        flash('notice', 'Wrong username or password');
-        break;
-    }
-    return redirect_to('/');
+
+  switch($result['error']) {
+    case 'locked':
+      flash('notice', 'This account is locked.');
+      break;
+    case 'banned':
+      flash('notice', "You're banned.");
+      break;
+    default:
+      flash('notice', 'Wrong username or password');
+      break;
   }
+
+  return redirect_to('/');
 });
 
 dispatch_get('/mypage', function() {
   $user = current_user();
-
   if (empty($user)) {
     flash('notice', 'You must be logged in');
     return redirect_to('/');
   }
-  else {
-    set('user', $user);
-    set('last_login', last_login($user['id']));
-    return html('mypage.html.php');
-  }
+
+  set('user', $user);
+  set('last_login', last_login($user['id']));
+  return html('mypage.html.php');
 });
 
 dispatch_get('/report', function() {
@@ -208,6 +198,28 @@ dispatch_get('/report', function() {
     'banned_ips' => banned_ips(),
     'locked_users' => locked_users()
   ]);
+});
+
+dispatch_get('/prepare', function () {
+  $redis = option('redis');
+
+  $threshold = option('config')['ip_ban_threshold'];
+  $failures = $redis->hgetall('LoginFailuresByIp');
+  foreach ($failures as $ip => $c) {
+    if ($c >= $threshold) {
+      apcu_store('IpBan:'.$ip, true);
+    }
+  }
+
+  $threshold = option('config')['user_lock_threshold'];
+  $failures = $redis->hgetall('LoginFailuresByLogin');
+  foreach ($failures as $id => $c) {
+    if ($c >= $threshold) {
+      apcu_store('Lock:'.$id, true);
+    }
+  }
+
+  echo 'done';
 });
 
 run();
